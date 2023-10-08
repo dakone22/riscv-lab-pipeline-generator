@@ -274,7 +274,7 @@ def main():
         print()
 
     tick_count = len(data_by_tick) + 1
-    with open('export.csv', 'w', newline="") as csvfile:
+    with open('output.csv', 'w', newline="") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(['Command', 'Code', 'id'] + list(map(str, range(1, tick_count))))
         for command in manager.completed_commands:
