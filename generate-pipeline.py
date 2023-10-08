@@ -1,127 +1,12 @@
 import csv
+from pathlib import Path
+
+from typing import List
+
+from parsing.tabular_list import parse
 
 
-def word_positions(input_string):
-    words = input_string.split()
-    positions = {}
-    start = 0
-
-    for word in words:
-        word_len = len(word)
-        end = input_string.find(word, start)
-        positions[end + word_len - 1] = word
-        start = end + word_len
-
-    return positions
-
-def find_first_data_line(lines):
-    for index, line in enumerate(lines):
-        stripped_line = line.strip()
-        if stripped_line and stripped_line[0] == "0":
-            return index
-
-    raise Exception("First data line not found! Make sure first line of data starts with zero!")
-
-WHITESPACE = [" ", ]
-
-def get_value_by_end_index(line, end_index):
-    start_index = end_index
-
-    while start_index > 0 and line[start_index] not in WHITESPACE:
-        start_index -= 1
-
-    return line[start_index + 1: end_index + 1]
-
-
-    # values = line.split()
-    #
-    # for value in values:
-    #     if line.rindex(value, 0, end_index + 1) + len(value) - 1 == end_index:
-    #         #if end_index == 51:
-    #         #    print(value)
-    #         return value
-    #
-    # return None
-
-def replace_char_inside_braces(text, replacing_char, replaced_char):
-    inside_braces_depth = 0
-    chars = list(text)
-    for index, char in enumerate(chars):
-        if char == "{":
-            inside_braces_depth += 1
-        elif char == "}":
-            inside_braces_depth -= 1
-        if inside_braces_depth > 0 and char == replacing_char:  # whitespace
-            chars[index] = replaced_char
-    return "".join(chars)
-
-SPLIT_CHAR = "_"
-
-# def merge_bracet_values(lst):
-#     merged_list = []
-#     stack = []
-#     nested_depth = 0
-
-#     for item in lst:
-#         if item.startswith('{'):
-#             nested_depth += 1
-#         elif item.endswith('}'):
-#             nested_depth -= 1
-#             if nested_depth == 0:
-#                 stack.append(item)
-#                 merged_list.append(SPLIT_CHAR.join(stack))
-#                 continue
-#         if nested_depth > 0:
-#             stack.append(item)
-#         else:
-#             merged_list.append(item)
-
-#     return merged_list
-
-
-def unnest_braces(value):
-    if not value.startswith("{"): 
-        return value
-    assert value.endswith("}")
-
-    value = value[1: -1]
-    
-    value = replace_char_inside_braces(value, SPLIT_CHAR, " ")
-
-
-    values = [replace_char_inside_braces(v, " ", SPLIT_CHAR) for v in value.split(SPLIT_CHAR)]
-    #return values
-    return list(map(unnest_braces, values))
-
-
-def main():
-    with open("input.lst", "r", encoding="utf-8") as f:
-        lines = f.readlines()
-    
-    # split into headers lines and data lines
-    first_data_line_index = find_first_data_line(lines)
-    header_lines, data_lines = lines[:first_data_line_index], lines[first_data_line_index:]
-
-    # fix multivalues in {}
-    for index, data_line in enumerate(data_lines):
-        data_lines[index] = replace_char_inside_braces(data_line, " ", SPLIT_CHAR)
-
-    # get headers' ends
-    headers_by_ends = {}
-    for line in header_lines:
-        headers_by_ends.update(word_positions(line))
-    
-    # collect all data by headers
-    data = {}
-    for end_index, header in headers_by_ends.items():
-        data[header] = []
-        for data_line in data_lines:
-            value = get_value_by_end_index(data_line, end_index)
-            value = unnest_braces(value)
-            data[header].append(value)
-
-    # print(data)
-
+def average_signal_data_by_tick(data):
     data_index_by_cyc_cnt = {}
 
     for index, cyc_cnt in enumerate(data["/tb/cyc_cnt"]):
@@ -133,142 +18,270 @@ def main():
 
     data_index_list = sorted(data_index_by_cyc_cnt.items(), key=lambda item: item[0])
 
-    # data_index_by_cyc_cnt = {}
-    #
-    # for index, cyc_cnt in enumerate(data["/tb/cyc_cnt"]):
-    #     if cyc_cnt.isnumeric():
-    #         data_index_by_cyc_cnt[int(cyc_cnt, 2)] = index
-    #         # if data_entry not in _cyc_cnt:
-    #         #     _cyc_cnt.add(data_entry)
-    #         #     data_index_list.append(index)
-    #
-    # data_index_list = sorted(data_index_by_cyc_cnt.items(), key=lambda item: item[0])
-    #
-    export_data_by_address_merged = []
-    active_commands = {}  # command: (start_tick, ["F", "ID", "W", "D", "AL"])
+    return [(cyc_cnt, index_list[len(index_list) // 2]) for cyc_cnt, index_list in data_index_list]
 
-    def to_int2(value: str) -> "int | None":
+
+class CommandProcessingManager:
+    def __init__(self):
+        self.completed_commands: List[CommandProcessing] = []
+        self.active_commands: List[CommandProcessing] = []
+        self.current_tick = 0
+
+    def set_tick(self, tick: int):
+        self.current_tick = tick
+
+    def new_fetch(self, address: int, id: int):
+        command = CommandProcessing(address, id)
+        command.fetch(self.current_tick)
+        self.active_commands.append(command)
+
+    def _find_command(self, address: int, id: int):
+        for command in self.active_commands:
+            if command.address == address and command.id == id:
+                return command
+        raise Warning(f"Not find command <pc={hex(address)}, id={id}>!")
+
+    def dispatching_complete(self, address: int, id: int, instruction: int):
+        command = self._find_command(address, id)
+        if not command:
+            raise Exception(f"Tried to dispatch command <pc={hex(address)}, id={id}>, but not found it!")
+
+        command.dispatch(self.current_tick, instruction)
+
+    def decoding(self, address: int, id: int, wait: bool):
+        command = self._find_command(address, id)
+        if not command:
+            raise Exception(f"Tried to decode command <pc={hex(address)}, id={id}>, but not found it!")
+
+        command.decode(self.current_tick, wait)
+
+    def issue_conflict(self, address: int, id: int):
+        command = self._find_command(address, id)
+        if not command:
+            raise Exception(f"Tried to issue_conflict command <pc={hex(address)}, id={id}>, but not found it!")
+
+        command.issue_conflict(self.current_tick)
+
+    def issue_bu(self, address: int, id: int):
+        command = self._find_command(address, id)
+        if not command:
+            raise Exception(f"Tried to issue_bu command <pc={hex(address)}, id={id}>, but not found it!")
+
+        command.issue_bu(self.current_tick)
+        self.completed_commands.append(self.active_commands.pop(self.active_commands.index(command)))
+
+    def issue_alu(self, address: int, id: int):
+        command = self._find_command(address, id)
+        if not command:
+            raise Exception(f"Tried to issue_alu command <pc={hex(address)}, id={id}>, but not found it!")
+
+        command.issue_alu(self.current_tick)
+        self.completed_commands.append(self.active_commands.pop(self.active_commands.index(command)))
+
+    def issue_lsu(self, address: int, id: int):
+        command = self._find_command(address, id)
+        if not command:
+            raise Exception(f"Tried to issue_lsu command <pc={hex(address)}, id={id}>, but not found it!")
+
+        command.issue_lsu(self.current_tick)
+        self.completed_commands.append(self.active_commands.pop(self.active_commands.index(command)))
+
+    def flush(self):
+        for command in self.active_commands:
+            command.cancel(self.current_tick)
+        self.completed_commands.extend(self.active_commands)
+        self.active_commands.clear()
+
+
+class CommandProcessing:
+    def __init__(self, address: int, id: int):
+        self.address = address
+        self.instruction: int = 0
+        self.id = id
+        self.stage = "fetching"
+        self.history = {}
+
+    def _fill_wait_gap(self, tick):
+        for t in range(max(self.history.keys()) + 1, tick):
+            self.history[t] = "W"
+
+    def cancel(self, tick):
+        self._fill_wait_gap(tick)
+
+        if tick in self.history.keys() and (self.history[tick] == "D" or self.history[tick] == "F"):
+            self.history[tick] += "X"
+        else:
+            self.history[tick] = "X"
+        self.stage = "canceled"
+
+    def fetch(self, tick):
+        if self.stage != "fetching":
+            raise Exception(f"Wrong time fetch for command {self}")
+
+        self.stage = "dispatching"
+        self.history[tick] = "F"
+
+    def dispatch(self, tick, instruction):
+        if self.stage != "dispatching":
+            raise Exception(f"Wrong time dispatch for command {self}")
+
+        self.stage = "decoding"
+        self.history[tick] = "ID"
+
+        self.instruction = instruction
+
+    def decode(self, tick, wait):
+        if self.stage != "decoding":
+            raise Exception(f"Wrong time decode for command {self}")
+
+        self._fill_wait_gap(tick)
+
+        if wait:
+            self.history[tick] = "W"
+        else:
+            self.stage = "issuing"
+            self.history[tick] = "D"
+
+    def issue_conflict(self, tick):
+        if self.stage != "issuing":
+            raise Exception(f"Wrong time issue_conflict for command {self}")
+
+        self.history[tick] = "C"
+
+    def _issue(self):
+        if self.stage != "issuing":
+            raise Exception(f"Wrong time issue for command {self}")
+
+        self.stage = "complete"
+
+    def issue_bu(self, tick):
+        self._issue()
+        self.history[tick] = "B"
+
+    def issue_alu(self, tick):
+        self._issue()
+        self.history[tick] = "AL"
+
+    def issue_lsu(self, tick):
+        self._issue()
+        self.history[tick] = "M1"
+        self.history[tick + 1] = "M2"
+        self.history[tick + 2] = "M3"
+
+    def __str__(self):
+        return f"<Command pc={hex(self.address)}, id={self.id}, history={self.history}>"
+
+
+def main():
+    data = parse(Path("input_test.lst"))
+    data_by_tick = average_signal_data_by_tick(data)
+
+    def to_int(value: str, base: int = 2) -> "int | None":
         if not value.isnumeric():
             return None
-        return int(value, 2)
+        return int(value, base)
 
-    def to_hex(data: "str | None") -> "str | None":
+    def to_hex(data) -> "str | None":
         if data is None:
             return None
         return hex(data)
 
-    for cyc_cnt, index_list in data_index_list:
-        print(active_commands)
-        index = index_list[len(index_list) // 2]
+    manager = CommandProcessingManager()
+
+    for cyc_cnt, index in data_by_tick:
+        manager.set_tick(cyc_cnt)
 
         def get(name: str) -> str:
             return data[name][index]
 
-        def get_int(name: str) -> "int | None":
-            return to_int2(get(name))
-
+        def get_int(name: str, base: int = 2) -> "int | None":
+            return to_int(get(name), base)
 
         cyc_cnt = get_int("/tb/cyc_cnt")
         print(f"Tick: {cyc_cnt}")
 
+        # Fetching
         pc = get_int("/tb/uut/cpu/fetch_block/pc")
         print(f"PC: {to_hex(pc)}")
 
-        #if pc in active_commands.keys(): break
-        active_commands[pc] = [cyc_cnt, ["F", "ID"]]
+        id = get_int("/tb/uut/cpu/id_block/pc_id")
+        print(f"pc_id: {id}")
 
+        pc_id_assigned = get_int("/tb/uut/cpu/fetch_block/pc_id_assigned") == 1
+
+        if pc_id_assigned:
+            manager.new_fetch(pc, id)
+
+        # ID (диспетчеризация)
+        pc_table = [to_int(_pc) for _pc in get("/tb/uut/cpu/id_block/pc_table")]
+        fetch_complete = get_int("/tb/uut/cpu/fetch_block/fetch_complete") == 1
+        if fetch_complete:
+            # WARNING: assume that if `fetch_complete` is positive,
+            #          the command identifier will be the previous one (id - 1),
+            #          although this may not always be the case
+            dispatching_id = (id - 1) % 8
+            dispatching_pc = pc_table[dispatching_id]
+            fetch_instruction = get_int("/tb/uut/cpu/fetch_block/fetch_instruction")
+            manager.dispatching_complete(dispatching_pc, dispatching_id, fetch_instruction)
+
+        # Decode
         decode = get("/tb/uut/cpu/id_block/decode")
-        decode_pc = to_int2(decode[1])
+
+        decode_id = to_int(decode[0])
+        decode_pc = to_int(decode[1])
+
+        decode_valid = to_int(decode[3]) == 1
+        decode_addr_valid = to_int(decode[4]) == 1
         decode_advance = get("/tb/uut/cpu/id_block/decode_advance") == "St1"
-        print(f"decode_pc: {to_hex(decode_pc)}")
-        print(f"decode_done: {(decode_advance)}")
-        if decode_pc in active_commands.keys() and cyc_cnt - active_commands[decode_pc][0] >= 2:
-            if decode_advance:
-                waited_ticks = cyc_cnt - active_commands[decode_pc][0]  - 2
-                active_commands[decode_pc][1].extend(["W"] * waited_ticks + ["D"])
+        if decode_valid and decode_addr_valid:
+            assert pc_table[decode_id] == decode_pc
+            print(f"decode_pc: {to_hex(decode_pc)}")
+            manager.decoding(decode_pc, decode_id, wait=not decode_advance)
+
+        # Issue
+        rs1_conflict = get("/tb/uut/cpu/decode_and_issue_block/rs1_conflict")
+        rs2_conflict = get("/tb/uut/cpu/decode_and_issue_block/rs2_conflict")
 
         issue = get("/tb/uut/cpu/decode_and_issue_block/issue")
-        issue_pc = to_int2(issue[0])
-        print(f"issue.pc: {to_hex(issue_pc)}")
+        issue_pc = to_int(issue[0])
+        issue_id = to_int(issue[9])
+        issue_stage_valid = to_int(issue[10]) == 1
+        if issue_stage_valid:
+            print(f"issue.pc: {to_hex(issue_pc)}")
+            print(f"issue.id: {issue_id}")
 
-        new_request_0 = get_int("/tb/uut/cpu/decode_and_issue_block/unit_issue[0]/new_request")
-        new_request_1 = get_int("/tb/uut/cpu/decode_and_issue_block/unit_issue[1]/new_request")
-        new_request_2 = get_int("/tb/uut/cpu/decode_and_issue_block/unit_issue[2]/new_request")
+            alu_new_request = get_int("/tb/uut/cpu/decode_and_issue_block/unit_issue[0]/new_request") == 1
+            lsu_new_request = get_int("/tb/uut/cpu/decode_and_issue_block/unit_issue[1]/new_request") == 1
+            bu_new_request = get_int("/tb/uut/cpu/decode_and_issue_block/unit_issue[2]/new_request") == 1
+            print(f"new_request[3]: {alu_new_request}, {lsu_new_request}, {bu_new_request}")
 
-        print(f"new_request[3]: {new_request_0}, {new_request_1}, {new_request_2}")
-        if new_request_2 == 1:
-            last = "B"
-        elif new_request_0 == 1:
-            last = "AL"
-        elif new_request_1 == 1:
-            last = "M"
-        elif new_request_0 == 0 and new_request_1 == 0 and new_request_2 == 0:
-            last = "C"
-        else:
-            raise Exception("Unknown new requests")
-        if issue_pc in active_commands.keys() and (active_commands[issue_pc][1][-1] == "D" or active_commands[issue_pc][1][-1] == "C") and cyc_cnt - active_commands[issue_pc][0] >= 3:
-            if last != "M":
-                active_commands[issue_pc][1].append(last)
+            if not any([alu_new_request, lsu_new_request, bu_new_request]):
+                assert (rs1_conflict or rs2_conflict)
+                manager.issue_conflict(issue_pc, issue_id)
             else:
-                active_commands[issue_pc][1].extend(["M1", "M2", "M3"])
+                if bu_new_request:
+                    manager.issue_bu(issue_pc, issue_id)
+                elif alu_new_request:
+                    manager.issue_alu(issue_pc, issue_id)
+                elif lsu_new_request:
+                    manager.issue_lsu(issue_pc, issue_id)
 
-            if last != "C":
-                start_tick, jobs = active_commands[issue_pc]
-
-                export_data_by_address_merged.append((issue_pc, {start_tick+index: job for index, job in enumerate(jobs)}))
-                print(f"exporting {export_data_by_address_merged[-1]}")
-
-                active_commands.pop(issue_pc)
-            #for key, value in active_commands.items():
-            #    export_data_by_address_merged.append((key, value))
-            #active_commands = dict()
-
-        flush = get_int("/tb/uut/cpu/gc_unit_block/gc_fetch_flush")
-        print(f"flush: {bool(flush)}")
-
+        flush = get_int("/tb/uut/cpu/gc_unit_block/gc_fetch_flush") == 1
         if flush:
-            active_commands[pc] = [cyc_cnt, ["F"]]
-            for command in active_commands.keys():
-                #active_commands[command][1][-1] = "X"
-                start_tick, jobs = active_commands[command]
-                jobs.extend(["W"] * (cyc_cnt - start_tick - len(jobs) + 1))
-                last = "X"
-                if jobs[-1] == "D":
-                    last = "DX"
-                elif jobs[-1] == "F":
-                    last = "FX"
-                jobs[-1] = last
-                export_data_by_address_merged.append((command, {start_tick+index: job for index, job in enumerate(jobs)}))
-                print(f"exporting {export_data_by_address_merged[-1]}")
-
-            active_commands = {} # active_commands[issue_pc] = None
-            continue
+            print(f"flush: {flush}")
+            manager.flush()
 
         print()
 
-    # print(
-    #     list(
-    #         map(
-    #             str,
-    #             range(
-    #                 1,
-    #                 max(
-    #                     active_commands.items(),
-    #                     key=lambda item:
-    #                         max(item[1].keys())
-    #                 )+1
-    #             )
-    #         )
-    #     )
-    # )
-    tick_len = len(data_index_list) + 1
+    tick_count = len(data_by_tick) + 1
     with open('export.csv', 'w', newline="") as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['Command'] + list(map(str, range(1, tick_len))))
-        for command, items in export_data_by_address_merged:
-            row = [hex(command)] + [""] * tick_len
-            for tick, c in items.items():
-                row[tick] = c
+        writer.writerow(['Command', 'Code', 'id'] + list(map(str, range(1, tick_count))))
+        for command in manager.completed_commands:
+            tick_line = [""] * tick_count
+            for tick, c in command.history.items():
+                tick_line[tick - 1] = c
+            row = [hex(command.address)[2:], hex(command.instruction)[2:].rjust(8, "0"), command.id] + tick_line
             writer.writerow(row)
 
 
