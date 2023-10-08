@@ -173,7 +173,7 @@ class CommandProcessing:
 
 
 def main():
-    data = parse(Path("input_test.lst"))
+    data = parse(Path("input.lst"))
     data_by_tick = average_signal_data_by_tick(data)
 
     def to_int(value: str, base: int = 2) -> "int | None":
