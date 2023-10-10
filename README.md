@@ -11,10 +11,10 @@
       ![select-and-copy-all-signals](docs/select-and-copy-all-signals.png)
    3. Перейти на вкладку `List` и вставить все сигналы (`Ctrl+V`)
       ![paste-signals-on-list-tab](docs/paste-signals-on-list-tab.png)
-   4. Экспортировать: `File` -> `Export` -> `Tabular list...` и сохранить в виде файла `input.lst`
+   4. Экспортировать: `File` -> `Export` -> `Tabular list...` и сохранить в виде файла формата `.lst`
       ![export-list-tab](docs/export-list-tab.png)
-3. Запустить `generate-pipeline.py`
-4. Результаты будут в файле `output.csv`
+3. Запустить `generate-pipeline.py VarX.lst`, входной файл будет либо первым аргументом, либо файл `input.lst`.
+4. Результаты будут в файле с названием входного файла и формата `.csv`, либо в файле `output.csv`
 5. (_опционально_) Импортировать в Excel: `Данные` -> `Из текстового/CSV-файла`
    ![excel-import-csv](docs/excel-import-csv.png)
 

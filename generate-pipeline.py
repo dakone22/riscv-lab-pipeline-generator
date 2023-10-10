@@ -1,4 +1,6 @@
 import csv
+import os
+import sys
 from pathlib import Path
 
 from typing import List
@@ -173,7 +175,18 @@ class CommandProcessing:
 
 
 def main():
-    data = parse(Path("input.lst"))
+    input_path = Path("input.lst")
+    output_path = Path("output.csv")
+    if len(sys.argv) > 1:
+        input_path = Path(sys.argv[1])
+        if len(sys.argv) > 2:
+            output_path = Path(sys.argv[2])
+        else:
+            output_path = Path(os.path.splitext(input_path)[0] + ".csv")
+
+    assert os.path.isfile(input_path)
+
+    data = parse(input_path)
     data_by_tick = average_signal_data_by_tick(data)
 
     def to_int(value: str, base: int = 2) -> "int | None":
@@ -274,7 +287,7 @@ def main():
         print()
 
     tick_count = len(data_by_tick) + 1
-    with open('output.csv', 'w', newline="") as csvfile:
+    with open(output_path, 'w', newline="") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(['Command', 'Code', 'id'] + list(map(str, range(1, tick_count))))
         for command in manager.completed_commands:
