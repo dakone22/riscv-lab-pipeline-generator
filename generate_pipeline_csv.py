@@ -18,7 +18,7 @@ def main() -> Path:
     tick_count = ticks
     with open(output_path, 'w', newline="") as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['Command', 'Code', 'id'] + list(map(str, range(1, tick_count))))
+        writer.writerow(['Адрес', 'Код', 'id'] + list(map(str, range(1, tick_count))))
         for command in completed_commands:
             tick_line = [""] * tick_count
             for tick, c in command.history.items():
