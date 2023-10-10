@@ -174,18 +174,7 @@ class CommandProcessing:
         return f"<Command pc={hex(self.address)}, id={self.id}, history={self.history}>"
 
 
-def main():
-    input_path = Path("input.lst")
-    output_path = Path("output.csv")
-    if len(sys.argv) > 1:
-        input_path = Path(sys.argv[1])
-        if len(sys.argv) > 2:
-            output_path = Path(sys.argv[2])
-        else:
-            output_path = Path(os.path.splitext(input_path)[0] + ".csv")
-
-    assert os.path.isfile(input_path)
-
+def generate_pipeline(input_path: Path):
     data = parse(input_path)
     data_by_tick = average_signal_data_by_tick(data)
 
@@ -286,16 +275,18 @@ def main():
 
         print()
 
-    tick_count = len(data_by_tick) + 1
-    with open(output_path, 'w', newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(['Command', 'Code', 'id'] + list(map(str, range(1, tick_count))))
-        for command in manager.completed_commands:
-            tick_line = [""] * tick_count
-            for tick, c in command.history.items():
-                tick_line[tick - 1] = c
-            row = [hex(command.address)[2:], hex(command.instruction)[2:].rjust(8, "0"), command.id] + tick_line
-            writer.writerow(row)
+    return len(data_by_tick), manager.completed_commands
+
+
+def get_input_path() -> Path:
+    if len(sys.argv) < 2:
+        raise Exception("First argument required: input filename!")
+
+    input_path = Path(sys.argv[1])
+
+    assert os.path.isfile(input_path)
+
+    return input_path
 
 
 if __name__ == "__main__":
